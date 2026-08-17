@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — UtsavHisab</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div id="app-shell" class="app-container">
+        <main class="main-content">
+            <header class="topbar">
+                <div>
+                    <h2>डॅशबोर्ड (Dashboard)</h2>
+                    <p id="current-festival-name">Ganeshotsav 2026</p>
+                </div>
+                <div class="topbar-controls">
+                    <a href="income.html" class="btn btn-success">+ वर्गणी जमा</a>
+                    <a href="expense.html" class="btn btn-danger">- खर्च नोंदवा</a>
+                </div>
+            </header>
+
+            <!-- Metrics Grid -->
+            <div class="grid grid-4" style="margin-bottom: 24px;">
+                <div class="card stat-card income">
+                    <span class="label">एकूण जमा (Income)</span>
+                    <div class="value" id="stat-total-income">₹0.00</div>
+                </div>
+                <div class="card stat-card expense">
+                    <span class="label">एकूण खर्च (Expense)</span>
+                    <div class="value" id="stat-total-expense">₹0.00</div>
+                </div>
+                <div class="card stat-card balance">
+                    <span class="label">शिल्लक रक्कम (Net Balance)</span>
+                    <div class="value" id="stat-net-balance">₹0.00</div>
+                </div>
+                <div class="card stat-card">
+                    <span class="label">रोख / Cash Box</span>
+                    <div class="value" id="stat-cash">₹0.00</div>
+                </div>
+            </div>
+
+            <!-- Detailed Accounts Grid -->
+            <div class="grid grid-2" style="margin-bottom: 24px;">
+                <div class="card">
+                    <div class="card-header">
+                        <h4>बँक आणि UPI शिल्लक</h4>
+                    </div>
+                    <div style="display:flex; justify-content:space-around; text-align:center;">
+                        <div>
+                            <p>Bank Balance</p>
+                            <h3 id="stat-bank" style="color:var(--primary);">₹0.00</h3>
+                        </div>
+                        <div>
+                            <p>UPI / QR Balance</p>
+                            <h3 id="stat-upi" style="color:var(--primary);">₹0.00</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h4>वर्गणी वर्गवारी (Category Breakdown)</h4>
+                    </div>
+                    <div style="max-height: 220px; display:flex; justify-content:center;">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Transactions Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h4>नुकत्याच झालेल्या नोंदी (Recent Transactions)</h4>
+                    <a href="reports.html" style="font-size: 0.85rem;">सर्व पहा &rarr;</a>
+                </div>
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>तारीख</th>
+                                <th>तपशील</th>
+                                <th>प्रकार</th>
+                                <th>रक्कम</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-tx-body">
+                            <!-- Populated dynamically via dashboard.js -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/supabase.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/offline.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/dashboard.js"></script>
+</body>
+</html>
