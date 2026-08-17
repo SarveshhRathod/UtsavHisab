@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>अहवाल (Reports) — UtsavHisab</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div id="app-shell" class="app-container">
+        <main class="main-content">
+            <header class="topbar">
+                <h2>हिशोब व ताळेबंद अहवाल (Financial Reports)</h2>
+            </header>
+
+            <div class="grid grid-2" style="max-width: 800px; margin: 0 auto;">
+                <div class="card" style="text-align: center; padding: 32px 20px;">
+                    <i data-lucide="file-spreadsheet" style="width:48px;height:48px;color:var(--success);margin-bottom:12px;"></i>
+                    <h3>Excel अहवाल (.xlsx)</h3>
+                    <p style="margin: 8px 0 20px 0;">सर्व वर्गणी, देणग्या, खर्च व जमा खात्यांचा संपूर्ण तपशील.</p>
+                    <button id="exportExcelBtn" class="btn btn-success btn-block"><i data-lucide="download"></i> Excel डाऊनलोड करा</button>
+                </div>
+
+                <div class="card" style="text-align: center; padding: 32px 20px;">
+                    <i data-lucide="file-text" style="width:48px;height:48px;color:var(--danger);margin-bottom:12px;"></i>
+                    <h3>PDF अहवाल (.pdf)</h3>
+                    <p style="margin: 8px 0 20px 0;">मंडळाच्या नोटीस बोर्डासाठी किंवा वर्गणीदारांना दाखवण्यासाठी ताळेबंद पत्रक.</p>
+                    <button id="exportPdfBtn" class="btn btn-danger btn-block"><i data-lucide="download"></i> PDF डाऊनलोड करा</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/supabase.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/reports.js"></script>
+</body>
+</html>
