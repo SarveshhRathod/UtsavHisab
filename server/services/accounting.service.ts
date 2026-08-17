@@ -1,9 +1,10 @@
-import { PrismaClient, PaymentMethod, Role } from '@prisma/client';
+import { PrismaClient, PaymentMethod, Role, Prisma } from '@prisma/client';
 import { numberToWords } from '@/lib/i18n';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
-export interface CreateIncomeInput {
+export interface RecordIncomeInput {
   mandalId: string;
   festivalId: string;
   categoryId: string;
@@ -16,7 +17,7 @@ export interface CreateIncomeInput {
   idempotencyKey?: string;
 }
 
-export interface CreateExpenseInput {
+export interface RecordExpenseInput {
   mandalId: string;
   festivalId: string;
   categoryId: string;
@@ -30,24 +31,44 @@ export interface CreateExpenseInput {
   idempotencyKey?: string;
 }
 
-export interface TransferInput {
+export interface TransferFundsInput {
   mandalId: string;
   festivalId: string;
   fromAccountId: string;
   toAccountId: string;
   amount: number;
-  notes?: string;
   userId: string;
+  notes?: string;
 }
 
 export class AccountingService {
   /**
-   * Records Income, creates Journal/Ledger entries, updates Account balance,
-   * updates Donor database, and issues an atomic sequential Receipt.
+   * Concurrency-safe atomic receipt generator using counter table
    */
-  static async recordIncome(input: CreateIncomeInput) {
+  private static async getNextReceiptNumber(tx: Prisma.TransactionClient, mandalId: string, festivalId: string) {
+    const template = await tx.receiptTemplate.findUnique({ where: { mandalId } });
+    const prefix = template?.prefix || 'UH';
+
+    const counter = await tx.receiptCounter.upsert({
+      where: { mandalId },
+      update: { currentVal: { increment: 1 } },
+      create: { mandalId, currentVal: 1 }
+    });
+
+    const year = new Date().getFullYear();
+    const padded = String(counter.currentVal).padStart(6, '0');
+    return {
+      receiptNumber: `${prefix}-${year}-${padded}`,
+      sequenceNumber: counter.currentVal
+    };
+  }
+
+  /**
+   * Atomic Income recording with idempotency, double-entry ledger, donor aggregation & receipt generation
+   */
+  static async recordIncome(input: RecordIncomeInput) {
     return await prisma.$transaction(async (tx) => {
-      // 1. Idempotency Check for Offline Sync
+      // 1. Idempotency Check
       if (input.idempotencyKey) {
         const existingTx = await tx.transaction.findUnique({
           where: { idempotencyKey: input.idempotencyKey },
@@ -58,7 +79,16 @@ export class AccountingService {
         }
       }
 
-      // 2. Fetch or create donor
+      // 2. Resolve Financial Account
+      const account = await tx.account.findFirst({
+        where: { mandalId: input.mandalId, type: input.paymentMethod, isActive: true }
+      });
+
+      if (!account) {
+        throw new Error(`ACCOUNT_NOT_FOUND: Active ${input.paymentMethod} ledger account does not exist.`);
+      }
+
+      // 3. Upsert Donor Profile
       let donorId: string | undefined;
       if (input.donorPhone || input.donorName) {
         const donor = await tx.donor.findFirst({
@@ -93,25 +123,8 @@ export class AccountingService {
         }
       }
 
-      // 3. Resolve Target Financial Account (Cash, Bank, or UPI)
-      let account = await tx.account.findFirst({
-        where: { mandalId: input.mandalId, type: input.paymentMethod, isActive: true }
-      });
-
-      if (!account) {
-        account = await tx.account.create({
-          data: {
-            mandalId: input.mandalId,
-            name: `${input.paymentMethod} Account`,
-            type: input.paymentMethod,
-            openingBalance: 0,
-            currentBalance: 0
-          }
-        });
-      }
-
-      // 4. Create Financial Master Transaction
-      const transaction = await tx.transaction.create({
+      // 4. Create Master Financial Transaction
+      const masterTx = await tx.transaction.create({
         data: {
           mandalId: input.mandalId,
           festivalId: input.festivalId,
@@ -121,7 +134,7 @@ export class AccountingService {
         }
       });
 
-      // 5. Update Account Balance atomically & record Ledger Entry
+      // 5. Update Account Balance & Record Ledger Debit
       const updatedBalance = Number(account.currentBalance) + Number(input.amount);
       await tx.account.update({
         where: { id: account.id },
@@ -130,18 +143,18 @@ export class AccountingService {
 
       await tx.ledgerEntry.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           accountId: account.id,
-          debit: input.amount, // Asset increased
+          debit: input.amount,
           credit: 0,
           balanceAfter: updatedBalance
         }
       });
 
-      // 6. Create Income record
+      // 6. Create Income Record
       const income = await tx.income.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           festivalId: input.festivalId,
           categoryId: input.categoryId,
           donorId,
@@ -154,41 +167,31 @@ export class AccountingService {
         }
       });
 
-      // 7. Generate Sequential Receipt
-      const template = await tx.receiptTemplate.findUnique({
-        where: { mandalId: input.mandalId }
-      });
-      const prefix = template?.prefix || 'MS';
-
-      const lastReceipt = await tx.receipt.findFirst({
-        where: { festivalId: input.festivalId },
-        orderBy: { sequenceNumber: 'desc' }
-      });
-      const nextSequence = (lastReceipt?.sequenceNumber || 0) + 1;
-      const paddedSeq = String(nextSequence).padStart(6, '0');
-      const year = new Date().getFullYear();
-      const receiptNumber = `${prefix}-${year}-${paddedSeq}`;
+      // 7. Atomic Concurrency-Safe Receipt Generation
+      const { receiptNumber, sequenceNumber } = await this.getNextReceiptNumber(tx, input.mandalId, input.festivalId);
+      const shareToken = crypto.randomBytes(12).toString('hex');
 
       const receipt = await tx.receipt.create({
         data: {
           incomeId: income.id,
           festivalId: input.festivalId,
           receiptNumber,
-          sequenceNumber: nextSequence,
+          sequenceNumber,
+          shareToken,
           donorName: input.donorName,
           amount: input.amount,
           amountInWords: numberToWords(Number(input.amount), 'mr')
         }
       });
 
-      // 8. Create Audit Log
+      // 8. Create Immutable Audit Record
       await tx.auditLog.create({
         data: {
           mandalId: input.mandalId,
           userId: input.collectorId,
           action: 'INCOME_RECORDED',
           entity: 'Transaction',
-          entityId: transaction.id,
+          entityId: masterTx.id,
           after: { amount: input.amount, donor: input.donorName, receiptNumber }
         }
       });
@@ -198,15 +201,32 @@ export class AccountingService {
   }
 
   /**
-   * Records Expense, evaluates approval thresholds, applies ledger reduction when approved.
+   * Atomic Expense recording with dynamic approval thresholds & ledger rollback guards
    */
-  static async recordExpense(input: CreateExpenseInput) {
+  static async recordExpense(input: RecordExpenseInput) {
     return await prisma.$transaction(async (tx) => {
-      // Threshold rules: < 5000 auto-approved, >= 5000 requires Treasurer / Admin approval
-      const requiresApproval = Number(input.amount) >= 5000;
+      if (input.idempotencyKey) {
+        const existingTx = await tx.transaction.findUnique({
+          where: { idempotencyKey: input.idempotencyKey },
+          include: { expense: true }
+        });
+        if (existingTx && existingTx.expense) return existingTx.expense;
+      }
+
+      // Check configured Mandal approval threshold
+      const mandal = await tx.mandal.findUniqueOrThrow({ where: { id: input.mandalId } });
+      const requiresApproval = Number(input.amount) >= Number(mandal.approvalLimit);
       const initialStatus = requiresApproval ? 'PENDING' : 'APPROVED';
 
-      const transaction = await tx.transaction.create({
+      const account = await tx.account.findFirst({
+        where: { mandalId: input.mandalId, type: input.paymentMethod, isActive: true }
+      });
+
+      if (!account) {
+        throw new Error(`ACCOUNT_NOT_FOUND: No active ${input.paymentMethod} account configured to pay expense.`);
+      }
+
+      const masterTx = await tx.transaction.create({
         data: {
           mandalId: input.mandalId,
           festivalId: input.festivalId,
@@ -218,7 +238,7 @@ export class AccountingService {
 
       const expense = await tx.expense.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           festivalId: input.festivalId,
           categoryId: input.categoryId,
           payeeName: input.payeeName,
@@ -232,29 +252,23 @@ export class AccountingService {
         }
       });
 
-      // If auto-approved, balance is deducted immediately
+      // Deduct balance immediately only if auto-approved
       if (initialStatus === 'APPROVED') {
-        const account = await tx.account.findFirst({
-          where: { mandalId: input.mandalId, type: input.paymentMethod, isActive: true }
+        const updatedBalance = Number(account.currentBalance) - Number(input.amount);
+        await tx.account.update({
+          where: { id: account.id },
+          data: { currentBalance: updatedBalance }
         });
 
-        if (account) {
-          const updatedBalance = Number(account.currentBalance) - Number(input.amount);
-          await tx.account.update({
-            where: { id: account.id },
-            data: { currentBalance: updatedBalance }
-          });
-
-          await tx.ledgerEntry.create({
-            data: {
-              transactionId: transaction.id,
-              accountId: account.id,
-              debit: 0,
-              credit: input.amount, // Asset decreased
-              balanceAfter: updatedBalance
-            }
-          });
-        }
+        await tx.ledgerEntry.create({
+          data: {
+            transactionId: masterTx.id,
+            accountId: account.id,
+            debit: 0,
+            credit: input.amount,
+            balanceAfter: updatedBalance
+          }
+        });
       }
 
       await tx.auditLog.create({
@@ -273,18 +287,18 @@ export class AccountingService {
   }
 
   /**
-   * Atomic inter-account transfer (e.g., Cash collected deposited into Bank)
+   * Dual-entry inter-account transfer without altering festival income/expense
    */
-  static async transferFunds(input: TransferInput) {
+  static async transferFunds(input: TransferFundsInput) {
     return await prisma.$transaction(async (tx) => {
       const fromAcc = await tx.account.findUniqueOrThrow({ where: { id: input.fromAccountId } });
       const toAcc = await tx.account.findUniqueOrThrow({ where: { id: input.toAccountId } });
 
       if (Number(fromAcc.currentBalance) < Number(input.amount)) {
-        throw new Error('Insufficient balance in source account for transfer');
+        throw new Error('INSUFFICIENT_FUNDS: Source account has insufficient balance.');
       }
 
-      const transaction = await tx.transaction.create({
+      const masterTx = await tx.transaction.create({
         data: {
           mandalId: input.mandalId,
           festivalId: input.festivalId,
@@ -299,10 +313,9 @@ export class AccountingService {
       await tx.account.update({ where: { id: fromAcc.id }, data: { currentBalance: updatedFromBalance } });
       await tx.account.update({ where: { id: toAcc.id }, data: { currentBalance: updatedToBalance } });
 
-      // Outgoing credit entry
       await tx.ledgerEntry.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           accountId: fromAcc.id,
           debit: 0,
           credit: input.amount,
@@ -310,10 +323,9 @@ export class AccountingService {
         }
       });
 
-      // Incoming debit entry
       await tx.ledgerEntry.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           accountId: toAcc.id,
           debit: input.amount,
           credit: 0,
@@ -323,7 +335,7 @@ export class AccountingService {
 
       await tx.accountTransfer.create({
         data: {
-          transactionId: transaction.id,
+          transactionId: masterTx.id,
           fromAccountId: fromAcc.id,
           toAccountId: toAcc.id,
           amount: input.amount,
@@ -336,30 +348,22 @@ export class AccountingService {
   }
 
   /**
-   * Retrieves accurate dashboard metrics strictly derived from active festival transactions
+   * Derive live festival totals and balances strictly from transactions
    */
   static async getFestivalFinancialSummary(mandalId: string, festivalId: string) {
     const [incomeAgg, expenseAgg, accounts, recentTransactions] = await Promise.all([
       prisma.income.aggregate({
-        where: {
-          festivalId,
-          transaction: { isArchived: false }
-        },
+        where: { festivalId, transaction: { isArchived: false } },
         _sum: { amount: true },
         _count: { id: true }
       }),
       prisma.expense.aggregate({
-        where: {
-          festivalId,
-          status: 'APPROVED',
-          transaction: { isArchived: false }
-        },
+        where: { festivalId, status: 'APPROVED', transaction: { isArchived: false } },
         _sum: { amount: true },
         _count: { id: true }
       }),
       prisma.account.findMany({
-        where: { mandalId, isActive: true },
-        select: { id: true, name: true, type: true, currentBalance: true }
+        where: { mandalId, isActive: true }
       }),
       prisma.transaction.findMany({
         where: { mandalId, festivalId, isArchived: false },
@@ -376,17 +380,17 @@ export class AccountingService {
     const totalExpense = Number(expenseAgg._sum.amount || 0);
     const netBalance = totalIncome - totalExpense;
 
-    const cashAccount = accounts.find(a => a.type === 'CASH');
-    const bankAccount = accounts.find(a => a.type === 'BANK');
-    const upiAccount = accounts.find(a => a.type === 'UPI');
+    const cash = accounts.find(a => a.type === 'CASH')?.currentBalance || 0;
+    const bank = accounts.find(a => a.type === 'BANK')?.currentBalance || 0;
+    const upi = accounts.find(a => a.type === 'UPI')?.currentBalance || 0;
 
     return {
       totalIncome,
       totalExpense,
       netBalance,
-      cashBalance: Number(cashAccount?.currentBalance || 0),
-      bankBalance: Number(bankAccount?.currentBalance || 0),
-      upiBalance: Number(upiAccount?.currentBalance || 0),
+      cashBalance: Number(cash),
+      bankBalance: Number(bank),
+      upiBalance: Number(upi),
       donationCount: incomeAgg._count.id,
       recentTransactions
     };
