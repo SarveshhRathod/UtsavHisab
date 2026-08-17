@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UtsavHisab — मंडळाचा हिशोब, आता डिजिटल</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body style="background:#FFF;">
+    <header style="padding: 16px 24px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border);">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <div style="background:var(--primary);color:#fff;width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:bold;">UH</div>
+            <h2 style="font-size:1.3rem;">UtsavHisab</h2>
+        </div>
+        <div>
+            <button onclick="signInWithGoogle()" class="btn btn-primary"><i data-lucide="log-in"></i> Login / मंडळ सुरू करा</button>
+        </div>
+    </header>
+
+    <main style="max-width: 900px; margin: 40px auto; padding: 0 20px; text-align: center;">
+        <span class="badge badge-primary" style="margin-bottom:12px;">गणेशोत्सव, नवरात्र व सर्व मंडळांसाठी #1 ऍप</span>
+        <h1 style="font-size: 2.5rem; margin-bottom: 16px;">मंडळाचा हिशोब, आता डिजिटल.</h1>
+        <p style="font-size: 1.15rem; max-width: 650px; margin: 0 auto 30px auto;">
+            वर्गणी, देणगी, खर्च, झटपट WhatsApp पावत्या आणि संपूर्ण हिशोब एका सोप्या प्लॅटफॉर्ममध्ये. वही-पेन आणि एक्सेलला म्हणा कायमचा निरोप!
+        </p>
+        
+        <div style="display:flex; gap:16px; justify-content:center; margin-bottom:48px;">
+            <button onclick="signInWithGoogle()" class="btn btn-primary" style="padding: 14px 28px; font-size:1.1rem;"><i data-lucide="sparkles"></i> मोफत सुरू करा (Google Login)</button>
+        </div>
+
+        <div class="grid grid-4" style="text-align: left; margin-top: 40px;">
+            <div class="card">
+                <i data-lucide="receipt" style="color:var(--primary); margin-bottom:8px;"></i>
+                <h4>WhatsApp पावत्या</h4>
+                <p>देणगीदारांना त्वरित डिजिटल पावती WhatsApp वर पाठवा.</p>
+            </div>
+            <div class="card">
+                <i data-lucide="shield-check" style="color:var(--success); margin-bottom:8px;"></i>
+                <h4>100% पारदर्शक व सुरक्षित</h4>
+                <p>रोख, बँक व UPI चे अचूक रेकॉर्ड. कोणताही गैरव्यवहार नाही.</p>
+            </div>
+            <div class="card">
+                <i data-lucide="wifi-off" style="color:var(--warning); margin-bottom:8px;"></i>
+                <h4>ऑफलाइन सपोर्ट</h4>
+                <p>इंटरनेट नसतानाही वर्गणी नोंदवा, रेंज आल्यावर आपोआप सिंक करा.</p>
+            </div>
+            <div class="card">
+                <i data-lucide="file-spreadsheet" style="color:var(--dark); margin-bottom:8px;"></i>
+                <h4>PDF & Excel रिपोर्ट्स</h4>
+                <p>एका क्लिकमध्ये मंडळाचा संपूर्ण ताळेबंद एक्सपोर्ट करा.</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/supabase.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        lucide.createIcons();
+        checkAuth(false).then(user => {
+            if (user) window.location.replace('dashboard.html');
+        });
+    </script>
+</body>
+</html>
