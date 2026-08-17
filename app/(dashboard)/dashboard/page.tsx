@@ -1,20 +1,19 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, MinusCircle, QrCode, FileSpreadsheet, Share2, WifiOff, Users, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { PlusCircle, MinusCircle, QrCode, FileSpreadsheet, Share2, WifiOff, Users, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 import { dictionaries, SupportedLang } from '@/lib/i18n';
 import { queueOfflineMutation, processSyncQueue } from '@/lib/offline/sync-engine';
 
-export default function MandalDashboard() {
+export default function UtsavHisabDashboard() {
   const [lang, setLang] = useState<SupportedLang>('mr');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [showIncomeModal, setShowIncomeModal] = useState(false);
-  const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'reports'>('overview');
+  const [isLoading, setIsLoading] = useState(false);
 
   const t = dictionaries[lang];
 
-  // Demo active metrics state
+  // Dynamic state loaded from real database
   const [summary, setSummary] = useState({
     festivalName: 'गणेशोत्सव २०२६',
     totalIncome: 151116,
@@ -25,14 +24,9 @@ export default function MandalDashboard() {
     upi: 8666,
   });
 
-  const [transactions, setTransactions] = useState([
-    { id: '1', name: 'राहुल शिंदे', type: 'INCOME', amount: 501, category: 'वर्गणी', method: 'CASH', time: '१० मिनिटांपूर्वी' },
-    { id: '2', name: 'प्रिया देशमुख', type: 'INCOME', amount: 1101, category: 'देणगी', method: 'UPI', time: '२५ मिनिटांपूर्वी' },
-    { id: '3', name: 'श्री डेकोरेशन', type: 'EXPENSE', amount: 1200, category: 'मंडप सजावट', method: 'CASH', time: '१ तासापूर्वी' },
-    { id: '4', name: 'अमित पाटील', type: 'INCOME', amount: 2500, category: 'विशेष देणगी', method: 'BANK', time: '२ तासांपूर्वी' },
-  ]);
+  const [transactions, setTransactions] = useState<any[]>([]);
 
-  // Fast Form State for 15-second mobile collection
+  // Fast Form State for 15-second collection flow
   const [donorName, setDonorName] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('वर्गणी (Vargani)');
@@ -43,11 +37,33 @@ export default function MandalDashboard() {
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    // Initial fetch
+    fetchDashboardData();
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/mandals/active/summary');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setSummary(data.data.summary);
+          setTransactions(data.data.recentTransactions);
+        }
+      }
+    } catch (e) {
+      console.warn('Using cached offline data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleQuickIncomeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,12 +72,11 @@ export default function MandalDashboard() {
     const numAmount = parseFloat(amount);
     const newTx = {
       id: crypto.randomUUID(),
-      name: donorName,
-      type: 'INCOME' as const,
+      donorName,
       amount: numAmount,
-      category,
-      method: payMethod,
-      time: 'आत्ताच'
+      category: { name: category },
+      paymentMethod: payMethod,
+      date: new Date().toISOString()
     };
 
     // Optimistic UI update
@@ -75,15 +90,12 @@ export default function MandalDashboard() {
       bank: payMethod === 'BANK' ? prev.bank + numAmount : prev.bank,
     }));
 
-    // Queue mutation offline/online
     await queueOfflineMutation('INCOME', {
-      mandalId: 'mandal-1',
-      festivalId: 'fest-2026',
-      categoryId: 'cat-vargani',
+      festivalId: 'fest-uuid',
+      categoryId: 'cat-uuid',
       amount: numAmount,
       donorName,
       paymentMethod: payMethod,
-      collectorId: 'user-admin'
     });
 
     setDonorName('');
@@ -93,12 +105,12 @@ export default function MandalDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-24 md:pb-8 font-sans antialiased">
-      {/* Top Bar */}
+      {/* Top Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 shadow-xs">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-orange-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              म
+              उ
             </div>
             <div>
               <h1 className="font-bold text-lg leading-tight flex items-center gap-2">
@@ -110,7 +122,6 @@ export default function MandalDashboard() {
             </div>
           </div>
 
-          {/* Language Switcher */}
           <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
             {(['mr', 'hi', 'en'] as SupportedLang[]).map((l) => (
               <button
@@ -125,7 +136,6 @@ export default function MandalDashboard() {
         </div>
       </header>
 
-      {/* Offline Status Warning Bar */}
       {!isOnline && (
         <div className="bg-amber-500 text-white px-4 py-2 text-xs font-medium flex items-center justify-center gap-2">
           <WifiOff className="w-4 h-4" />
@@ -134,7 +144,7 @@ export default function MandalDashboard() {
       )}
 
       <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Main Net Balance Hero Card */}
+        {/* Net Balance Card */}
         <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
           <div className="flex justify-between items-start">
             <div>
@@ -170,7 +180,7 @@ export default function MandalDashboard() {
           </div>
         </section>
 
-        {/* Account Split Breakdown (Cash / Bank / UPI) */}
+        {/* Account Split Breakdown */}
         <section className="grid grid-cols-3 gap-3">
           <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
             <span className="text-xs text-slate-500 font-medium">{t.cash}</span>
@@ -186,7 +196,7 @@ export default function MandalDashboard() {
           </div>
         </section>
 
-        {/* Primary Action Buttons */}
+        {/* Action Buttons */}
         <section className="grid grid-cols-2 gap-3">
           <button
             onClick={() => setShowIncomeModal(true)}
@@ -196,7 +206,7 @@ export default function MandalDashboard() {
             <span>{t.addIncome}</span>
           </button>
           <button
-            onClick={() => setShowExpenseModal(true)}
+            onClick={() => window.location.href = '/expenses/new'}
             className="flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-3.5 px-4 rounded-xl shadow-sm transition active:scale-98"
           >
             <MinusCircle className="w-5 h-5" />
@@ -204,24 +214,23 @@ export default function MandalDashboard() {
           </button>
         </section>
 
-        {/* Recent Transactions List */}
+        {/* Recent Transactions */}
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <div className="flex justify-between items-center mb-4">
             <h2 className="font-bold text-slate-800 text-base">{t.recentTransactions}</h2>
-            <button className="text-xs font-semibold text-orange-600 hover:underline">सर्व पहा</button>
+            <a href="/transactions" className="text-xs font-semibold text-orange-600 hover:underline">सर्व पहा</a>
           </div>
           <div className="divide-y divide-slate-100">
-            {transactions.map((tx) => (
+            {transactions.slice(0, 5).map((tx) => (
               <div key={tx.id} className="py-3 flex items-center justify-between">
                 <div>
-                  <p className="font-semibold text-slate-800 text-sm">{tx.name}</p>
-                  <p className="text-xs text-slate-500">{tx.category} • <span className="uppercase font-mono">{tx.method}</span></p>
+                  <p className="font-semibold text-slate-800 text-sm">{tx.donorName || tx.payeeName}</p>
+                  <p className="text-xs text-slate-500">{tx.category?.name} • <span className="uppercase font-mono">{tx.paymentMethod}</span></p>
                 </div>
                 <div className="text-right">
-                  <p className={`font-bold text-sm ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {tx.type === 'INCOME' ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
+                  <p className={`font-bold text-sm ${tx.type === 'EXPENSE' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    {tx.type === 'EXPENSE' ? '-' : '+'}₹{Number(tx.amount).toLocaleString('en-IN')}
                   </p>
-                  <p className="text-[11px] text-slate-400">{tx.time}</p>
                 </div>
               </div>
             ))}
@@ -229,7 +238,7 @@ export default function MandalDashboard() {
         </section>
       </main>
 
-      {/* 15-Second Fast Vargani Modal */}
+      {/* 15-Second Fast Vargani Entry Modal */}
       {showIncomeModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-2xl p-6 space-y-4 shadow-2xl animate-in slide-in-from-bottom-5">
@@ -299,27 +308,27 @@ export default function MandalDashboard() {
         </div>
       )}
 
-      {/* Mobile Bottom Floating Navigation Bar */}
+      {/* Bottom Floating App Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200 py-2 px-6 flex justify-around items-center md:hidden shadow-lg">
-        <button className="flex flex-col items-center gap-1 text-orange-600">
+        <a href="/dashboard" className="flex flex-col items-center gap-1 text-orange-600">
           <div className="w-5 h-5 font-bold">🏠</div>
           <span className="text-[10px] font-bold">{t.dashboard}</span>
-        </button>
-        <button className="flex flex-col items-center gap-1 text-slate-400">
+        </a>
+        <a href="/receipts" className="flex flex-col items-center gap-1 text-slate-400">
           <QrCode className="w-5 h-5" />
           <span className="text-[10px] font-medium">{t.receipts}</span>
-        </button>
+        </a>
         <button onClick={() => setShowIncomeModal(true)} className="w-12 h-12 bg-orange-600 text-white rounded-full flex items-center justify-center -mt-5 shadow-lg border-4 border-white">
           <PlusCircle className="w-6 h-6" />
         </button>
-        <button className="flex flex-col items-center gap-1 text-slate-400">
+        <a href="/door-to-door" className="flex flex-col items-center gap-1 text-slate-400">
           <Users className="w-5 h-5" />
           <span className="text-[10px] font-medium">{t.doorToDoor}</span>
-        </button>
-        <button className="flex flex-col items-center gap-1 text-slate-400">
+        </a>
+        <a href="/reports" className="flex flex-col items-center gap-1 text-slate-400">
           <FileSpreadsheet className="w-5 h-5" />
           <span className="text-[10px] font-medium">{t.reports}</span>
-        </button>
+        </a>
       </nav>
     </div>
   );
