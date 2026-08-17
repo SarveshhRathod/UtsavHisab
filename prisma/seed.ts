@@ -4,32 +4,30 @@ import { numberToWords } from '../lib/i18n';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Seeding production-grade MandalSetu demo dataset...');
+  console.log('Seeding UtsavHisab demo dataset...');
 
-  // 1. Create Demo Super Admin & Users
   const rahul = await prisma.user.upsert({
-    where: { email: 'rahul.admin@mandalsetu.com' },
+    where: { email: 'rahul.admin@utsavhisab.com' },
     update: {},
     create: {
       name: 'राहुल शांताराम पाटील (अध्यक्ष)',
-      email: 'rahul.admin@mandalsetu.com',
+      email: 'rahul.admin@utsavhisab.com',
       phone: '9822012345',
       preferredLang: 'mr'
     }
   });
 
   const sachin = await prisma.user.upsert({
-    where: { email: 'sachin.treasurer@mandalsetu.com' },
+    where: { email: 'sachin.treasurer@utsavhisab.com' },
     update: {},
     create: {
       name: 'सचिन वसंतराव देशपांडे (खजिनदार)',
-      email: 'sachin.treasurer@mandalsetu.com',
+      email: 'sachin.treasurer@utsavhisab.com',
       phone: '9822098765',
       preferredLang: 'mr'
     }
   });
 
-  // 2. Create Demo Mandal
   const mandal = await prisma.mandal.upsert({
     where: { joinCode: '482916' },
     update: {},
@@ -48,7 +46,6 @@ async function main() {
     }
   });
 
-  // 3. Assign Membership Roles
   await prisma.mandalMember.createMany({
     data: [
       { mandalId: mandal.id, userId: rahul.id, role: Role.PRESIDENT },
@@ -57,7 +54,6 @@ async function main() {
     skipDuplicates: true
   });
 
-  // 4. Create Active Festival
   const festival = await prisma.festival.create({
     data: {
       mandalId: mandal.id,
@@ -70,75 +66,32 @@ async function main() {
     }
   });
 
-  // 5. Create Accounts
-  const cashAcc = await prisma.account.create({
-    data: { mandalId: mandal.id, name: 'रोख खाते (Cash)', type: PaymentMethod.CASH, openingBalance: 5000, currentBalance: 25000 }
-  });
-  const bankAcc = await prisma.account.create({
-    data: { mandalId: mandal.id, name: 'SBI चालू खाते', type: PaymentMethod.BANK, openingBalance: 20000, currentBalance: 45000 }
-  });
-  const upiAcc = await prisma.account.create({
-    data: { mandalId: mandal.id, name: 'मंडळ मुख्य UPI QR', type: PaymentMethod.UPI, openingBalance: 0, currentBalance: 8666 }
+  await prisma.account.createMany({
+    data: [
+      { mandalId: mandal.id, name: 'रोख खाते (Cash)', type: PaymentMethod.CASH, openingBalance: 5000, currentBalance: 25000 },
+      { mandalId: mandal.id, name: 'SBI चालू खाते', type: PaymentMethod.BANK, openingBalance: 20000, currentBalance: 45000 },
+      { mandalId: mandal.id, name: 'मंडळ मुख्य UPI QR', type: PaymentMethod.UPI, openingBalance: 0, currentBalance: 8666 }
+    ]
   });
 
-  // 6. Create Income & Expense Categories
   const catVargani = await prisma.incomeCategory.create({
     data: { mandalId: mandal.id, name: 'वर्गणी (Vargani)', sortOrder: 1 }
   });
-  const catDonation = await prisma.incomeCategory.create({
-    data: { mandalId: mandal.id, name: 'देणगी (Donation)', sortOrder: 2 }
-  });
-  const catDecor = await prisma.expenseCategory.create({
-    data: { mandalId: mandal.id, name: 'मंडप व सजावट (Mandap & Decor)', sortOrder: 1 }
+
+  const area = await prisma.area.create({
+    data: { mandalId: mandal.id, name: 'लेन क्र. १ - मुख्य रस्ता' }
   });
 
-  // 7. Seed Sample Income Transactions & Receipts
-  const sampleDonors = [
-    { name: 'विकास मोरे', amount: 501, method: PaymentMethod.CASH },
-    { name: 'सुहास कुलकर्णी', amount: 2100, method: PaymentMethod.UPI },
-    { name: 'गजानन शेठ ट्रेडर्स', amount: 11000, method: PaymentMethod.BANK },
-  ];
+  await prisma.household.createMany({
+    data: [
+      { areaId: area.id, houseNo: '१०१', familyName: 'पाटील परिवार', targetAmount: 501, collected: 501, status: 'COLLECTED' },
+      { areaId: area.id, houseNo: '१०२', familyName: 'देशमुख निवास', targetAmount: 1001, collected: 0, status: 'PENDING' }
+    ]
+  });
 
-  let seq = 1;
-  for (const item of sampleDonors) {
-    const tx = await prisma.transaction.create({
-      data: { mandalId: mandal.id, festivalId: festival.id, type: 'INCOME', amount: item.amount }
-    });
-
-    const income = await prisma.income.create({
-      data: {
-        transactionId: tx.id,
-        festivalId: festival.id,
-        categoryId: catVargani.id,
-        donorName: item.name,
-        amount: item.amount,
-        paymentMethod: item.method,
-        collectorId: sachin.id
-      }
-    });
-
-    await prisma.receipt.create({
-      data: {
-        incomeId: income.id,
-        festivalId: festival.id,
-        receiptNumber: `SSGM-2026-${String(seq).padStart(6, '0')}`,
-        sequenceNumber: seq,
-        donorName: item.name,
-        amount: item.amount,
-        amountInWords: numberToWords(item.amount, 'mr')
-      }
-    });
-    seq++;
-  }
-
-  console.log('Database seeding successfully completed with sample mandal data.');
+  console.log('Demo Mandal, Festival, Ledgers, and Households seeded successfully.');
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch((e) => { console.error(e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });
