@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -40,9 +41,9 @@ enum ApprovalStatus {
 }
 
 enum Language {
-  mr // Marathi
-  hi // Hindi
-  en // English
+  mr
+  hi
+  en
 }
 
 model User {
@@ -51,16 +52,19 @@ model User {
   name             String
   phone            String?
   image            String?
+  passwordHash     String?
   preferredLang    Language        @default(mr)
+  isSuperAdmin     Boolean         @default(false)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   memberships      MandalMember[]
-  createdIncomes   Income[]        @relation("IncomeCreatedBy")
-  createdExpenses  Expense[]       @relation("ExpenseCreatedBy")
-  auditLogs        AuditLog[]
+  createdIncomes   Income[]        @relation("IncomeCollector")
+  createdExpenses  Expense[]       @relation("ExpenseCreator")
   approvals        Approval[]
+  auditLogs        AuditLog[]
   assignedAreas    AreaCollector[]
+  reconciliations  Reconciliation[]
 
   @@index([email])
 }
@@ -69,7 +73,7 @@ model Mandal {
   id              String            @id @default(uuid())
   name            String
   shortName       String
-  joinCode        String            @unique // 6-digit code e.g. 482916
+  joinCode        String            @unique // 6-digit deterministic join code
   address         String
   city            String
   district        String
@@ -82,6 +86,7 @@ model Mandal {
   defaultLang     Language          @default(mr)
   isSuspended     Boolean           @default(false)
   freeIncomeLimit Decimal           @default(50000.00) @db.Decimal(12, 2)
+  approvalLimit   Decimal           @default(5000.00) @db.Decimal(12, 2)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
@@ -92,9 +97,12 @@ model Mandal {
   accounts        Account[]
   donors          Donor[]
   receiptTemplate ReceiptTemplate?
+  receiptCounter  ReceiptCounter?
   areas           Area[]
   auditLogs       AuditLog[]
   joinRequests    JoinRequest[]
+  notifications   Notification[]
+  transactions    Transaction[]
 
   @@index([joinCode])
 }
@@ -123,7 +131,7 @@ model JoinRequest {
   createdAt  DateTime       @default(now())
 
   mandal     Mandal         @relation(fields: [mandalId], references: [id], onDelete: Cascade)
-  
+
   @@unique([mandalId, userId])
 }
 
@@ -152,16 +160,19 @@ model Festival {
 model Account {
   id             String          @id @default(uuid())
   mandalId       String
-  name           String          // Cash in Hand, SBI Main A/c, Primary UPI
-  type           PaymentMethod   // CASH, BANK, UPI
+  name           String          // Cash in Hand, Main Bank A/c, Primary UPI
+  type           PaymentMethod   // CASH, BANK, UPI, OTHER
   accountNumber  String?
   ifscCode       String?
   openingBalance Decimal         @default(0.00) @db.Decimal(12, 2)
   currentBalance Decimal         @default(0.00) @db.Decimal(12, 2)
   isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   mandal         Mandal          @relation(fields: [mandalId], references: [id], onDelete: Cascade)
   ledgerEntries  LedgerEntry[]
+  reconciliations Reconciliation[]
 
   @@index([mandalId, type])
 }
@@ -169,7 +180,7 @@ model Account {
 model IncomeCategory {
   id          String    @id @default(uuid())
   mandalId    String
-  name        String    // Vargani, Donation, Sponsorship, Advertisement
+  name        String
   description String?
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
@@ -183,7 +194,7 @@ model IncomeCategory {
 model ExpenseCategory {
   id          String    @id @default(uuid())
   mandalId    String
-  name        String    // Decoration, Mandap, Sound, Lighting, Prasad
+  name        String
   description String?
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
@@ -222,10 +233,11 @@ model Transaction {
   date           DateTime        @default(now())
   isArchived     Boolean         @default(false)
   archiveReason  String?
-  idempotencyKey String?         @unique // For Offline Sync Deduplication
+  idempotencyKey String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  mandal         Mandal          @relation(fields: [mandalId], references: [id], onDelete: Cascade)
   festival       Festival        @relation(fields: [festivalId], references: [id], onDelete: Cascade)
   income         Income?
   expense        Expense?
@@ -233,6 +245,7 @@ model Transaction {
   ledgerEntries  LedgerEntry[]
 
   @@index([mandalId, festivalId, date])
+  @@index([mandalId, isArchived])
 }
 
 model Income {
@@ -253,8 +266,8 @@ model Income {
   transaction    Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   festival       Festival        @relation(fields: [festivalId], references: [id], onDelete: Cascade)
   category       IncomeCategory  @relation(fields: [categoryId], references: [id])
-  donor          Donor?          @relation(fields: [donorId], references: [id])
-  collector      User            @relation("IncomeCreatedBy", fields: [collectorId], references: [id])
+  donor          Donor?          @relation(fields: [donorId], references: [id], onDelete: SetNull)
+  collector      User            @relation("IncomeCollector", fields: [collectorId], references: [id])
   receipt        Receipt?
 
   @@index([festivalId, paymentMethod])
@@ -266,7 +279,7 @@ model Expense {
   transactionId  String          @unique
   festivalId     String
   categoryId     String
-  payeeName      String          // Vendor / Payee
+  payeeName      String
   amount         Decimal         @db.Decimal(12, 2)
   paymentMethod  PaymentMethod
   status         ApprovalStatus  @default(PENDING)
@@ -279,7 +292,7 @@ model Expense {
   transaction    Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   festival       Festival        @relation(fields: [festivalId], references: [id], onDelete: Cascade)
   category       ExpenseCategory @relation(fields: [categoryId], references: [id])
-  createdBy      User            @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  createdBy      User            @relation("ExpenseCreator", fields: [createdById], references: [id])
   approvals      Approval[]
 
   @@index([festivalId, status])
@@ -312,13 +325,22 @@ model LedgerEntry {
   @@index([accountId, createdAt])
 }
 
+model ReceiptCounter {
+  id         String   @id @default(uuid())
+  mandalId   String   @unique
+  currentVal Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  mandal     Mandal   @relation(fields: [mandalId], references: [id], onDelete: Cascade)
+}
+
 model Receipt {
   id             String        @id @default(uuid())
   incomeId       String        @unique
   festivalId     String
-  receiptNumber  String        @unique // e.g. GNV-2026-000123
+  receiptNumber  String        @unique
   sequenceNumber Int
-  shareToken     String        @unique @default(nanoid(12)) // Public secure random access token
+  shareToken     String        @unique // Cryptographic random access token
   donorName      String
   amount         Decimal       @db.Decimal(12, 2)
   amountInWords  String
@@ -328,12 +350,13 @@ model Receipt {
   festival       Festival      @relation(fields: [festivalId], references: [id], onDelete: Cascade)
 
   @@index([festivalId, sequenceNumber])
+  @@index([shareToken])
 }
 
 model ReceiptTemplate {
   id           String   @id @default(uuid())
   mandalId     String   @unique
-  prefix       String   @default("RCP")
+  prefix       String   @default("UH")
   headerText   String?
   footerNote   String?  @default("श्रींच्या चरणी सादर अर्पण. धन्यवाद!")
   signatoryUrl String?
@@ -352,12 +375,14 @@ model Approval {
 
   expense    Expense        @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
 }
 
 model Area {
   id          String          @id @default(uuid())
   mandalId    String
-  name        String          // e.g. Lane 1, Building A-D, Sector 4
+  name        String
   description String?
 
   mandal      Mandal          @relation(fields: [mandalId], references: [id], onDelete: Cascade)
@@ -368,18 +393,19 @@ model Area {
 }
 
 model Household {
-  id          String   @id @default(uuid())
-  areaId      String
-  houseNumber String
-  familyName  String
-  phone       String?
-  targetAmount Decimal @default(0.00) @db.Decimal(10, 2)
-  collected   Decimal  @default(0.00) @db.Decimal(10, 2)
-  status      String   @default("PENDING") // PENDING, PARTIAL, COLLECTED
+  id           String   @id @default(uuid())
+  areaId       String
+  houseNumber  String
+  familyName   String
+  phone        String?
+  targetAmount Decimal  @default(0.00) @db.Decimal(10, 2)
+  collected    Decimal  @default(0.00) @db.Decimal(10, 2)
+  status       String   @default("PENDING") // PENDING, PARTIAL, COLLECTED
+  updatedAt    DateTime @updatedAt
 
-  area        Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  area         Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
 
-  @@index([areaId])
+  @@index([areaId, status])
 }
 
 model AreaCollector {
@@ -393,12 +419,42 @@ model AreaCollector {
   @@unique([areaId, userId])
 }
 
+model Reconciliation {
+  id             String   @id @default(uuid())
+  accountId      String
+  userId         String
+  expectedBalance Decimal @db.Decimal(12, 2)
+  actualBalance   Decimal @db.Decimal(12, 2)
+  difference      Decimal @db.Decimal(12, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([accountId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  mandalId  String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  mandal    Mandal   @relation(fields: [mandalId], references: [id], onDelete: Cascade)
+
+  @@index([mandalId, isRead])
+}
+
 model AuditLog {
   id        String   @id @default(uuid())
   mandalId  String
   userId    String?
-  action    String   // INCOME_CREATE, EXPENSE_APPROVE, ACCOUNT_TRANSFER, etc.
-  entity    String   // Transaction, Member, Settings
+  action    String
+  entity    String
   entityId  String
   before    Json?
   after     Json?
